@@ -65,7 +65,6 @@ python tools\ci_build\build.py `
     --use_openvino GPU `
     --use_dml `
     --skip_tests `
-    --cmake_generator Ninja `
     --cmake_extra_defines `
         OpenVINO_DIR="$OpenVinoDir" `
         onnxruntime_BUILD_UNIT_TESTS=OFF `
