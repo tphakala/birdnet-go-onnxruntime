@@ -1,6 +1,15 @@
 MIT License
 
-Copyright (c) 2026 Tomi P. Hakala
+The build scripts, CI workflows, and tooling in this repository are:
+
+  Copyright (c) 2026 Tomi P. Hakala
+
+The ONNX Runtime libraries distributed in release archives are:
+
+  Copyright (c) Microsoft Corporation
+
+Both are licensed under the MIT License (full text below). Release archives
+also include Microsoft's ThirdPartyNotices.txt covering bundled components.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
