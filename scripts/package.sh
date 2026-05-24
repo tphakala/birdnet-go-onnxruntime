@@ -28,10 +28,21 @@ if [ ! -d "$BUILD_INPUT" ]; then
     exit 1
 fi
 
+# ORT source directory (for license files)
+ORT_SRC="${REPO_ROOT}/onnxruntime"
+
 # Create staging directory
 rm -rf "$STAGING"
 mkdir -p "$STAGING/lib"
 cp "$BUILD_INPUT"/* "$STAGING/lib/"
+
+# Include ORT license files in the archive (required by MIT license)
+if [ -f "$ORT_SRC/LICENSE" ]; then
+    cp "$ORT_SRC/LICENSE" "$STAGING/LICENSE"
+fi
+if [ -f "$ORT_SRC/ThirdPartyNotices.txt" ]; then
+    cp "$ORT_SRC/ThirdPartyNotices.txt" "$STAGING/ThirdPartyNotices.txt"
+fi
 
 # Compute per-library checksums and sizes
 libraries_json="["
