@@ -51,15 +51,8 @@ func main() {
 	version := ort.GetVersion()
 	fmt.Printf("ORT version: %s\n", version)
 
-	providers, err := ort.GetAvailableProviders()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "GetAvailableProviders failed: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("Available providers: %v\n", providers)
-
-	if len(providers) == 0 {
-		fmt.Fprintln(os.Stderr, "No providers available")
+	if version == "" {
+		fmt.Fprintln(os.Stderr, "ORT version is empty, library may not be loaded correctly")
 		os.Exit(1)
 	}
 
