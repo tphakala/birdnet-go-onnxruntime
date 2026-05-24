@@ -1,0 +1,12 @@
+# Build outputs
+build/
+dist/
+*.tar.gz
+*.zip
+
+# ORT source (checked out during build)
+onnxruntime/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
