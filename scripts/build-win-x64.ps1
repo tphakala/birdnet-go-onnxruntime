@@ -73,7 +73,13 @@ python tools\ci_build\build.py `
 
 # Collect output
 New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
-$ReleaseDir = Join-Path $BuildDir "Release"
+# VS generator outputs to Release/Release/ (config subdir under build dir)
+# Ninja outputs to Release/ (flat). Check both.
+$ReleaseDir = Join-Path $BuildDir "Release" "Release"
+if (-not (Test-Path "$ReleaseDir\onnxruntime.dll")) {
+    $ReleaseDir = Join-Path $BuildDir "Release"
+}
+Write-Host "Looking for DLLs in: $ReleaseDir"
 
 Copy-Item "$ReleaseDir\onnxruntime.dll" $OutputDir
 Copy-Item "$ReleaseDir\onnxruntime_providers_shared.dll" $OutputDir
