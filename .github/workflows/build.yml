@@ -1,0 +1,264 @@
+name: Build ONNX Runtime
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build (leave empty for all)'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - linux
+          - windows
+
+permissions:
+  contents: write
+
+env:
+  OPENVINO_VERSION: '2025.4.1'
+
+jobs:
+  parse-version:
+    runs-on: ubuntu-latest
+    outputs:
+      ort_version: ${{ steps.parse.outputs.ort_version }}
+      build_number: ${{ steps.parse.outputs.build_number }}
+      tag: ${{ steps.parse.outputs.tag }}
+    steps:
+      - name: Parse version from tag or generate for dispatch
+        id: parse
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="v1.25.1-dev"
+          fi
+          if [[ "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-(.+)$ ]]; then
+            echo "ort_version=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "build_number=${BASH_REMATCH[2]}" >> "$GITHUB_OUTPUT"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Tag '$TAG' does not match pattern v{VERSION}-{BUILD}"
+            exit 1
+          fi
+
+  build-linux:
+    needs: parse-version
+    if: inputs.platform == '' || inputs.platform == 'linux'
+    runs-on: ubuntu-24.04
+    env:
+      ORT_VERSION: ${{ needs.parse-version.outputs.ort_version }}
+      BUILD_NUMBER: ${{ needs.parse-version.outputs.build_number }}
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v6
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          df -h /
+
+      - name: Install OpenVINO SDK
+        run: |
+          wget -qO- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+            | gpg --dearmor | sudo tee /usr/share/keyrings/intel-openvino.gpg >/dev/null
+          echo "deb [signed-by=/usr/share/keyrings/intel-openvino.gpg] https://apt.repos.intel.com/openvino/2025 ubuntu24 main" \
+            | sudo tee /etc/apt/sources.list.d/intel-openvino.list
+          sudo apt-get update
+          sudo apt-get install -y openvino-toolkit-${{ env.OPENVINO_VERSION }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get install -y python3 python3-pip cmake ninja-build protobuf-compiler
+
+      - name: Checkout ONNX Runtime source
+        uses: actions/checkout@v6
+        with:
+          repository: microsoft/onnxruntime
+          ref: v${{ env.ORT_VERSION }}
+          path: onnxruntime
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Get ORT commit hash
+        id: ort-commit
+        run: |
+          cd onnxruntime
+          echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build ORT with OpenVINO EP
+        run: |
+          export BUILD_PARALLEL=4
+          ./scripts/build-linux-x64.sh "${{ env.ORT_VERSION }}"
+
+      - name: Verify build output
+        run: |
+          echo "Build output:"
+          ls -lh build/linux-x64/
+          test -s build/linux-x64/libonnxruntime.so.${{ env.ORT_VERSION }}
+          test -s build/linux-x64/libonnxruntime_providers_openvino.so
+          test -s build/linux-x64/libonnxruntime_providers_shared.so
+          ldd build/linux-x64/libonnxruntime.so.${{ env.ORT_VERSION }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
+
+      - name: Run Go smoke test
+        run: |
+          cd test
+          ORT_LIB_DIR=${{ github.workspace }}/build/linux-x64 go run .
+
+      - name: Package archive
+        id: package
+        run: |
+          export OPENVINO_VERSION="${{ env.OPENVINO_VERSION }}"
+          export GITHUB_RUNNER_NAME="${{ runner.name }}"
+          ./scripts/package.sh linux x64 "${{ env.ORT_VERSION }}" "${{ env.BUILD_NUMBER }}" "${{ steps.ort-commit.outputs.commit }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: onnxruntime-linux-x64
+          path: |
+            dist/onnxruntime-linux-x64-*.tar.gz
+            dist/onnxruntime-linux-x64-*.sha256
+
+  build-windows:
+    needs: parse-version
+    if: inputs.platform == '' || inputs.platform == 'windows'
+    runs-on: windows-2022
+    env:
+      ORT_VERSION: ${{ needs.parse-version.outputs.ort_version }}
+      BUILD_NUMBER: ${{ needs.parse-version.outputs.build_number }}
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install OpenVINO via pip
+        run: |
+          pip install openvino==${{ env.OPENVINO_VERSION }}
+
+      - name: Install CMake and Ninja
+        run: |
+          choco install cmake ninja -y
+
+      - name: Checkout ONNX Runtime source
+        uses: actions/checkout@v6
+        with:
+          repository: microsoft/onnxruntime
+          ref: v${{ env.ORT_VERSION }}
+          path: onnxruntime
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Get ORT commit hash
+        id: ort-commit
+        shell: bash
+        run: |
+          cd onnxruntime
+          echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build ORT with OpenVINO + DirectML EPs
+        run: |
+          $env:BUILD_PARALLEL = "4"
+          .\scripts\build-win-x64.ps1 -OrtVersion "${{ env.ORT_VERSION }}"
+
+      - name: Verify build output
+        shell: pwsh
+        run: |
+          Write-Host "Build output:"
+          Get-ChildItem build\win-x64 | Format-Table Name, Length
+          if (-not (Test-Path "build\win-x64\onnxruntime.dll")) {
+              Write-Error "onnxruntime.dll not found"
+              exit 1
+          }
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.24'
+
+      - name: Run Go smoke test
+        shell: bash
+        run: |
+          cd test
+          ORT_LIB_DIR="${{ github.workspace }}\\build\\win-x64" go run .
+
+      - name: Package archive
+        shell: bash
+        run: |
+          export OPENVINO_VERSION="${{ env.OPENVINO_VERSION }}"
+          export GITHUB_RUNNER_NAME="${{ runner.name }}"
+          ./scripts/package.sh win x64 "${{ env.ORT_VERSION }}" "${{ env.BUILD_NUMBER }}" "${{ steps.ort-commit.outputs.commit }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: onnxruntime-win-x64
+          path: |
+            dist/onnxruntime-win-x64-*.zip
+            dist/onnxruntime-win-x64-*.sha256
+
+  release:
+    needs: [parse-version, build-linux, build-windows]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.parse-version.outputs.tag }}
+      ORT_VERSION: ${{ needs.parse-version.outputs.ort_version }}
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "${{ env.TAG }}" \
+            artifacts/**/* \
+            --repo "${{ github.repository }}" \
+            --title "ONNX Runtime ${{ env.ORT_VERSION }} (Build ${{ needs.parse-version.outputs.build_number }})" \
+            --notes "$(cat <<'NOTES'
+          ## ONNX Runtime ${{ env.ORT_VERSION }}
+
+          Pre-compiled ONNX Runtime with Execution Provider support for BirdNET-Go.
+
+          ### Included EPs
+
+          | Platform | EPs |
+          |----------|-----|
+          | Linux x86_64 | OpenVINO, CPU |
+          | Windows x86_64 | OpenVINO, DirectML, CPU |
+
+          ### Runtime Dependencies
+
+          These archives contain only the ONNX Runtime shared libraries. EP-specific
+          runtime dependencies must be installed separately. See metadata.json in
+          each archive for details.
+
+          ### Checksums
+
+          Verify archive integrity using the SHA256 checksum in the .sha256 file
+          alongside each archive, or use:
+          ```
+          sha256sum onnxruntime-*.tar.gz onnxruntime-*.zip
+          ```
+          NOTES
+          )"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
