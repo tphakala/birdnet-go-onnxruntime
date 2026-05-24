@@ -105,7 +105,7 @@ METADATA
 mkdir -p "$DIST_DIR"
 if [ "$PLATFORM" = "win" ]; then
     archive_name="${ARTIFACT_NAME}.zip"
-    (cd "$DIST_DIR" && zip -r "$archive_name" "$ARTIFACT_NAME")
+    (cd "$DIST_DIR" && 7z a -tzip "$archive_name" "$ARTIFACT_NAME")
 else
     archive_name="${ARTIFACT_NAME}.tar.gz"
     tar -czf "$DIST_DIR/$archive_name" -C "$DIST_DIR" "$ARTIFACT_NAME"
