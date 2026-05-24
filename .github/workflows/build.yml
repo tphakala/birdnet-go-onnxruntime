@@ -70,7 +70,7 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/intel-openvino.gpg] https://apt.repos.intel.com/openvino/2025 ubuntu24 main" \
             | sudo tee /etc/apt/sources.list.d/intel-openvino.list
           sudo apt-get update
-          sudo apt-get install -y openvino-toolkit-${{ env.OPENVINO_VERSION }}
+          sudo apt-get install -y libopenvino-dev-${{ env.OPENVINO_VERSION }}
 
       - name: Install build dependencies
         run: |
